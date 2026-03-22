@@ -1,0 +1,211 @@
+# ==============================
+# INSTALL REQUIRED LIBRARIES
+# ==============================
+
+!pip install torch torchvision opencv-python matplotlib
+
+# ==============================
+# IMPORT LIBRARIES
+# ==============================
+
+import torch
+import torchvision
+import cv2
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+from torchvision.transforms import functional as F
+from google.colab import drive
+
+# ==============================
+# MOUNT GOOGLE DRIVE
+# ==============================
+
+drive.mount('/content/drive')
+
+# ==============================
+# DEFINE INPUT / OUTPUT FOLDERS
+# ==============================
+
+input_folder = "/content/drive/MyDrive/images for od"
+output_folder = "/content/drive/MyDrive/detection_results"
+
+os.makedirs(output_folder, exist_ok=True)
+
+# ==============================
+# LOAD FASTER R-CNN MODEL
+# ==============================
+
+model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
+model.eval()
+
+# ==============================
+# COCO LABELS
+# ==============================
+
+COCO_CLASSES = [
+'__background__','person','bicycle','car','motorcycle','airplane','bus',
+'train','truck','boat','traffic light','fire hydrant','stop sign'
+]
+
+# ==============================
+# TRAFFIC LIGHT COLOR DETECTOR
+# ==============================
+
+def detect_light_color(roi):
+
+    hsv = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
+
+    red_mask = cv2.inRange(hsv,(0,120,70),(10,255,255))
+    yellow_mask = cv2.inRange(hsv,(20,100,100),(30,255,255))
+    green_mask = cv2.inRange(hsv,(40,50,50),(90,255,255))
+
+    red_pixels = np.sum(red_mask)
+    yellow_pixels = np.sum(yellow_mask)
+    green_pixels = np.sum(green_mask)
+
+    if red_pixels > yellow_pixels and red_pixels > green_pixels:
+        return "red"
+
+    elif yellow_pixels > red_pixels and yellow_pixels > green_pixels:
+        return "yellow"
+
+    else:
+        return "green"
+
+# ==============================
+# READ IMAGES FROM FOLDER
+# ==============================
+
+image_files = []
+
+for file in os.listdir(input_folder):
+    if file.endswith(('.png','.jpg','.jpeg')):
+        image_files.append(os.path.join(input_folder,file))
+
+print("Total images found:",len(image_files))
+
+# ==============================
+# PROCESS EACH IMAGE
+# ==============================
+
+for image_path in image_files:
+
+    print("Processing:",image_path)
+
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    before_img = image.copy()
+
+    image_tensor = F.to_tensor(image).unsqueeze(0)
+
+    with torch.no_grad():
+        predictions = model(image_tensor)
+
+    boxes = predictions[0]['boxes']
+    labels = predictions[0]['labels']
+    scores = predictions[0]['scores']
+
+    threshold = 0.6
+    action = "GO"
+
+    for i in range(len(boxes)):
+
+        if scores[i] > threshold:
+
+            label_id = labels[i].item()
+
+            if label_id < len(COCO_CLASSES):
+                label = COCO_CLASSES[label_id]
+            else:
+                label = "object"
+
+            box = boxes[i].cpu().numpy().astype(int)
+
+            x1,y1,x2,y2 = box
+
+            cv2.rectangle(image,(x1,y1),(x2,y2),(0,255,0),2)
+
+            cv2.putText(image,label,(x1,y1-10),
+                        cv2.FONT_HERSHEY_SIMPLEX,0.7,(0,255,0),2)
+
+            roi = before_img[y1:y2,x1:x2]
+
+            if label == "traffic light":
+
+                color = detect_light_color(roi)
+
+                cv2.putText(image,color,(x1,y2+20),
+                            cv2.FONT_HERSHEY_SIMPLEX,0.7,(255,255,0),2)
+
+                if color == "yellow":
+                    action = "GO SLOW"
+
+                elif color == "red":
+                    action = "STOP"
+
+                elif color == "green":
+                    action = "GO"
+
+            if label in ["person","dog","cat","cow","horse"]:
+                action = "STOP"
+
+            if label == "truck":
+                action = "GO SLOW"
+
+    # ==============================
+    # ADD BEFORE / AFTER LABELS
+    # ==============================
+
+    cv2.putText(before_img,"Before Detection",
+                (30,40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,(255,255,255),3)
+
+    cv2.putText(image,"After Detection",
+                (30,40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,(255,255,255),3)
+
+    # ==============================
+    # CREATE ACTION BANNER
+    # ==============================
+
+    banner_height = 70
+    banner = np.zeros((banner_height,image.shape[1],3),dtype=np.uint8)
+
+    cv2.putText(banner,
+                f"Driving Action: {action}",
+                (20,45),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0,255,255),
+                3)
+
+    # Attach banner to after image
+    after_with_banner = np.vstack((banner,image))
+
+    # Resize before image to same height
+    before_resized = cv2.resize(before_img,(image.shape[1],after_with_banner.shape[0]))
+
+    # ==============================
+    # COMBINE BEFORE + AFTER
+    # ==============================
+
+    combined = np.hstack((before_resized,after_with_banner))
+
+    # ==============================
+    # SAVE RESULT
+    # ==============================
+
+    filename = os.path.basename(image_path)
+    save_path = os.path.join(output_folder,filename)
+
+    cv2.imwrite(save_path,cv2.cvtColor(combined,cv2.COLOR_RGB2BGR))
+
+    print("Driving Action:",action)
+    print("Saved to:",save_path)
+    print("-------------")
+
+print("Processing Completed")
