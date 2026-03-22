@@ -44,7 +44,7 @@ Each result shows:
 ---
 
 ### Traffic Congestion Detection
-![Traffic Detection](assets/result_traffic_jam.png)
+Detection_results/360_F_440908818_xsPuuCOqKvwkrBiXfUx3zUYOymkqgB4L.png
 
 Driving Action: **GO SLOW**
 
